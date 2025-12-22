@@ -9,8 +9,10 @@ from openai import OpenAI
 from gtts import gTTS
 from dotenv import load_dotenv
 
+
 # Load environment variables
 load_dotenv()
+
 
 # Configure logging
 logging.basicConfig(
@@ -19,12 +21,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
+
 # Configure max upload size (10MB)
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
+
 
 # Initialize Groq client
 try:
@@ -42,6 +47,7 @@ except Exception as e:
     logger.error(f"Failed to initialize Groq client: {str(e)}")
     client = None
 
+
 # Global state for ESP32 communication
 esp32_data = {
     'status': 'ready',
@@ -51,405 +57,366 @@ esp32_data = {
     'response_text': ''
 }
 
+
 # ====================== HTML PAGE ======================
 
 HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8" />
-    <title>مساعد صوتي - ESP32 + Groq</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مساعد صوتي ذكي - Smart Voice Assistant</title>
     <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
         body {
-            font-family: Arial, sans-serif;
-            background: #0f172a;
-            color: #e5e7eb;
-            margin: 0;
-            padding: 0;
-            direction: rtl;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: radial-gradient(at 0% 0%, #3b3b3b 0%, #050505 60%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            color: #f5f5f5;
         }
+
         .container {
-            max-width: 800px;
-            margin: 40px auto;
-            background: #111827;
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            background: rgba(15, 15, 15, 0.96);
+            border-radius: 20px;
+            padding: 32px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+            max-width: 600px;
+            width: 100%;
+            animation: fadeIn 0.5s ease-in;
+            border: 1px solid rgba(120, 120, 120, 0.4);
         }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
         h1 {
+            color: #e5e1ff;
             text-align: center;
-            margin-bottom: 8px;
-            color: #f9fafb;
+            margin-bottom: 10px;
+            font-size: 30px;
+            font-weight: 700;
         }
+
         .subtitle {
             text-align: center;
-            color: #9ca3af;
-            margin-bottom: 24px;
+            color: #a3a3a3;
+            margin-bottom: 26px;
+            font-size: 13px;
         }
-        .status-bar {
+
+        .controls {
             display: flex;
-            justify-content: space-between;
-            margin-bottom: 16px;
-            font-size: 14px;
+            gap: 12px;
+            margin-bottom: 22px;
+            justify-content: center;
+            flex-wrap: wrap;
         }
-        .status-pill {
-            padding: 6px 10px;
-            border-radius: 999px;
-            background: #1f2937;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 999px;
-        }
-        .dot.online { background: #22c55e; }
-        .dot.offline { background: #ef4444; }
-        .dot.processing { background: #eab308; }
-        .card {
-            background: #020617;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
-            border: 1px solid #1f2937;
-        }
-        .card h2 {
-            margin-top: 0;
-            font-size: 18px;
-            margin-bottom: 8px;
-        }
-        .text-box {
-            background: #020617;
-            border-radius: 8px;
-            padding: 12px;
-            min-height: 60px;
-            border: 1px solid #1f2937;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            font-size: 14px;
-        }
-        .btn {
-            background: linear-gradient(to right, #3b82f6, #6366f1);
-            color: white;
+
+        button {
+            padding: 12px 26px;
             border: none;
             border-radius: 999px;
-            padding: 10px 20px;
-            font-size: 15px;
+            font-size: 14px;
+            font-weight: 600;
             cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            transition: transform 0.1s ease, box-shadow 0.1s ease, opacity 0.2s;
-            box-shadow: 0 10px 25px rgba(59,130,246,0.4);
+            transition: all 0.2s ease;
+            color: #fdfdfd;
+            font-family: inherit;
+            letter-spacing: 0.3px;
         }
-        .btn:active {
-            transform: translateY(1px);
-            box-shadow: 0 5px 15px rgba(59,130,246,0.3);
+
+        #recordBtn {
+            background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
+            box-shadow: 0 0 18px rgba(129, 140, 248, 0.45);
         }
-        .btn:disabled {
-            opacity: 0.5;
+
+        #stopBtn {
+            background: linear-gradient(135deg, #f97373 0%, #ef4444 100%);
+            display: none;
+            box-shadow: 0 0 18px rgba(248, 113, 113, 0.45);
+        }
+
+        #clearBtn {
+            background: linear-gradient(135deg, #facc15 0%, #fb923c 100%);
+            color: #111827;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-1px) scale(1.01);
+            box-shadow: 0 14px 25px rgba(0,0,0,0.4);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(0) scale(0.99);
+        }
+
+        button:disabled {
+            opacity: 0.45;
             cursor: not-allowed;
             box-shadow: none;
+            transform: none;
         }
-        .btn-secondary {
-            background: #1f2937;
-            box-shadow: none;
+
+        .status {
+            background: rgba(17, 24, 39, 0.9);
+            padding: 18px;
+            border-radius: 14px;
+            margin-bottom: 18px;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(55, 65, 81, 0.9);
         }
-        .btn-secondary:hover {
-            background: #374151;
+
+        .status-text {
+            color: #e5e7eb;
+            font-size: 14px;
+            text-align: center;
         }
-        .btn + .btn {
-            margin-right: 8px;
+
+        .recording {
+            animation: pulse 1.4s ease-in-out infinite;
         }
-        .record-icon {
-            width: 10px;
-            height: 10px;
-            border-radius: 999px;
-            background: #ef4444;
-            box-shadow: 0 0 0 0 rgba(239,68,68,0.6);
-            animation: pulse 1.5s infinite;
-        }
+
         @keyframes pulse {
-            0% {
-                transform: scale(1);
-                box-shadow: 0 0 0 0 rgba(239,68,68,0.7);
-            }
-            70% {
-                transform: scale(1.4);
-                box-shadow: 0 0 0 10px rgba(239,68,68,0);
-            }
-            100% {
-                transform: scale(1);
-                box-shadow: 0 0 0 0 rgba(239,68,68,0);
-            }
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50%      { opacity: 0.6; transform: scale(1.01); }
         }
-        .wave {
-            display: inline-flex;
-            align-items: flex-end;
-            gap: 3px;
-            margin-right: 8px;
+
+        .result {
+            background: rgba(22, 163, 74, 0.08);
+            border-radius: 14px;
+            margin-top: 18px;
+            display: none;
+            animation: slideIn 0.25s ease-out;
+            border: 1px solid rgba(34, 197, 94, 0.4);
+            padding: 16px 18px;
         }
-        .wave span {
-            display: block;
-            width: 3px;
-            height: 6px;
-            background: #60a5fa;
-            border-radius: 999px;
-            animation: wave 1s infinite ease-in-out;
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
         }
-        .wave span:nth-child(2) { animation-delay: 0.1s; }
-        .wave span:nth-child(3) { animation-delay: 0.2s; }
-        .wave span:nth-child(4) { animation-delay: 0.3s; }
-        .wave span:nth-child(5) { animation-delay: 0.4s; }
-        @keyframes wave {
-            0%, 100% { height: 6px; }
-            50% { height: 16px; }
+
+        .result h3 {
+            color: #bbf7d0;
+            margin-bottom: 6px;
+            font-size: 15px;
         }
-        .log {
-            font-family: monospace;
-            font-size: 12px;
-            color: #9ca3af;
-            max-height: 120px;
-            overflow-y: auto;
-            background: #020617;
-            border-radius: 8px;
-            padding: 8px;
-            border: 1px solid #1f2937;
+
+        .result p {
+            color: #e5e5e5;
+            line-height: 1.6;
+            font-size: 14px;
         }
-        .log-line {
-            margin-bottom: 2px;
+
+        .loader {
+            border: 4px solid rgba(55, 65, 81, 0.9);
+            border-top: 4px solid #8b5cf6;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            animation: spin 0.9s linear infinite;
+            margin: 0 auto;
         }
+
+        @keyframes spin {
+            0%   { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: rgba(127, 29, 29, 0.16);
+            border: 1px solid rgba(248, 113, 113, 0.55);
+        }
+
+        .error .status-text {
+            color: #fecaca;
+        }
+
+        .success {
+            background: rgba(22, 163, 74, 0.12);
+            border-color: rgba(34, 197, 94, 0.6);
+        }
+
         .footer {
             text-align: center;
-            margin-top: 16px;
-            font-size: 12px;
-            color: #4b5563;
+            margin-top: 22px;
+            padding-top: 14px;
+            border-top: 1px solid rgba(55, 65, 81, 0.85);
+            color: #9ca3af;
+            font-size: 11px;
         }
-        .error {
-            color: #f87171;
+
+        .footer a {
+            color: #a5b4fc;
+            text-decoration: none;
         }
-        .success {
-            color: #4ade80;
+
+        .footer a:hover {
+            text-decoration: underline;
         }
-        .spinner {
-            border: 3px solid #1f2937;
-            border-top: 3px solid #60a5fa;
-            border-radius: 50%;
-            width: 16px;
-            height: 16px;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-            margin-left: 6px;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+
+        @media (max-width: 600px) {
+            .container { padding: 22px; }
+            h1 { font-size: 24px; }
+            button { padding: 10px 18px; font-size: 13px; }
         }
     </style>
 </head>
 <body>
-<div class="container">
-    <h1>المساعد الصوتي - ESP32 + Groq</h1>
-    <div class="subtitle">تسجيل من ESP32 → خادم Flask → Groq (Whisper + Llama) → صوت gTTS → رجوع لـ ESP32</div>
+    <div class="container">
+        <h1>🎤 مساعد صوتي ذكي</h1>
+        <p class="subtitle">مدعوم بـ Groq Whisper و Llama 3 (نسخة مجانية)</p>
 
-    <div class="status-bar">
-        <div class="status-pill" id="server-status-pill">
-            <div class="dot offline" id="server-dot"></div>
-            <span id="server-status-text">جاري فحص الخادم...</span>
+        <div class="controls">
+            <button id="recordBtn">🎙️ ابدأ التسجيل</button>
+            <button id="stopBtn">⏹️ إيقاف التسجيل</button>
+            <button id="clearBtn">🗑️ مسح</button>
         </div>
-        <div class="status-pill" id="esp32-status-pill">
-            <div class="dot offline" id="esp32-dot"></div>
-            <span id="esp32-status-text">حالة ESP32 غير معروفة</span>
+
+        <div class="status" id="statusBox">
+            <div class="status-text" id="statusText">اضغط على زر التسجيل للبدء</div>
+        </div>
+
+        <div class="result" id="result">
+            <h3>📝 النص المحول:</h3><p id="transcriptText"></p>
+            <h3 style="margin-top: 10px;">🤖 رد المساعد:</h3><p id="responseText"></p>
+        </div>
+
+        <div class="footer">
+            <p>Powered by Groq &amp; Google TTS</p>
         </div>
     </div>
 
-    <div class="card">
-        <h2>تسجيل من ESP32</h2>
-        <p style="margin-bottom: 8px; color: #9ca3af;">
-            استخدم ESP32 لإرسال ملف الصوت (WAV/RAW) لهذا الخادم عبر HTTP POST إلى <code>/upload</code>.
-        </p>
-        <button class="btn" id="btn-test-record">
-            <div class="record-icon" id="record-icon"></div>
-            <span id="record-btn-text">اختبار إرسال ملف صوتي يدويًا</span>
-        </button>
-        <input type="file" id="audio-file-input" accept="audio/*" style="display:none" />
-        <button class="btn btn-secondary" id="btn-clear">
-            مسح آخر استجابة
-        </button>
-    </div>
+    <script>
+        let mediaRecorder; let audioChunks = [];
+        const recordBtn = document.getElementById('recordBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const statusBox = document.getElementById('statusBox');
+        const statusText = document.getElementById('statusText');
+        const result = document.getElementById('result');
+        const transcriptText = document.getElementById('transcriptText');
+        const responseText = document.getElementById('responseText');
 
-    <div class="card">
-        <h2>النص المستلم من ESP32</h2>
-        <div class="text-box" id="user-text-box">لم يصل نص بعد.</div>
-    </div>
-
-    <div class="card">
-        <h2>رد المساعد (سيتم تحويله لصوت)</h2>
-        <div class="text-box" id="assistant-text-box">لا يوجد رد بعد.</div>
-        <div style="margin-top: 10px;">
-            <button class="btn btn-secondary" id="btn-play-audio" disabled>
-                تشغيل الصوت الناتج في المتصفح
-            </button>
-        </div>
-        <audio id="assistant-audio" style="display:none"></audio>
-    </div>
-
-    <div class="card">
-        <h2>السجل (Logs)</h2>
-        <div class="log" id="log-box"></div>
-    </div>
-
-    <div class="footer">
-        تأكد أن ESP32 يقرأ البيانات من <code>/get-audio-stream</code> ويرسلها إلى DAC/I2S بنفس إعدادات 16kHz, 16-bit, mono.
-    </div>
-</div>
-
-<script>
-    const serverStatusText = document.getElementById('server-status-text');
-    const serverDot = document.getElementById('server-dot');
-    const esp32StatusText = document.getElementById('esp32-status-text');
-    const esp32Dot = document.getElementById('esp32-dot');
-    const logBox = document.getElementById('log-box');
-    const userTextBox = document.getElementById('user-text-box');
-    const assistantTextBox = document.getElementById('assistant-text-box');
-    const btnTestRecord = document.getElementById('btn-test-record');
-    const btnClear = document.getElementById('btn-clear');
-    const recordIcon = document.getElementById('record-icon');
-    const recordBtnText = document.getElementById('record-btn-text');
-    const audioFileInput = document.getElementById('audio-file-input');
-    const btnPlayAudio = document.getElementById('btn-play-audio');
-    const assistantAudio = document.getElementById('assistant-audio');
-
-    function log(message, type = '') {
-        const line = document.createElement('div');
-        line.className = 'log-line';
-        if (type === 'error') line.classList.add('error');
-        if (type === 'success') line.classList.add('success');
-        const timestamp = new Date().toLocaleTimeString();
-        line.textContent = `[${timestamp}] ${message}`;
-        logBox.appendChild(line);
-        logBox.scrollTop = logBox.scrollHeight;
-    }
-
-    async function checkStatus() {
-        try {
-            const res = await fetch('/status');
-            if (!res.ok) throw new Error('Status not OK');
-            const data = await res.json();
-            serverStatusText.textContent = 'الخادم متصل';
-            serverDot.classList.remove('offline');
-            serverDot.classList.add('online');
-            esp32StatusText.textContent = 'حالة ESP32: ' + (data.esp32_status || 'غير معروفة');
-            if (data.esp32_status === 'ready') {
-                esp32Dot.classList.remove('offline', 'processing');
-                esp32Dot.classList.add('online');
-            } else if (data.esp32_status === 'processing' || data.esp32_status === 'sending_to_esp32') {
-                esp32Dot.classList.remove('offline', 'online');
-                esp32Dot.classList.add('processing');
-            } else {
-                esp32Dot.classList.remove('online', 'processing');
-                esp32Dot.classList.add('offline');
-            }
-        } catch (err) {
-            serverStatusText.textContent = 'الخادم غير متصل';
-            serverDot.classList.remove('online', 'processing');
-            serverDot.classList.add('offline');
-            esp32StatusText.textContent = 'لا يمكن جلب حالة ESP32';
-            esp32Dot.classList.remove('online', 'processing');
-            esp32Dot.classList.add('offline');
-            log('تعذر الاتصال بمسار /status', 'error');
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            statusText.innerHTML = '❌ المتصفح لا يدعم تسجيل الصوت';
+            statusBox.classList.add('error');
+            recordBtn.disabled = true;
         }
-    }
 
-    setInterval(checkStatus, 5000);
-    checkStatus();
+        recordBtn.addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
+                });
 
-    btnTestRecord.addEventListener('click', () => {
-        audioFileInput.click();
-    });
+                const options = { mimeType: 'audio/webm' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options.mimeType = 'audio/ogg; codecs=opus';
+                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                        options.mimeType = 'audio/mp4';
+                    }
+                }
 
-    audioFileInput.addEventListener('change', async () => {
-        const file = audioFileInput.files[0];
-        if (!file) return;
+                mediaRecorder = new MediaRecorder(stream, options);
+                audioChunks = [];
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: options.mimeType });
+                    await uploadAudio(audioBlob);
+                };
+                mediaRecorder.start();
 
-        log('جاري رفع الملف الصوتي للاختبار...', '');
-        btnTestRecord.disabled = true;
-        btnTestRecord.classList.add('btn-secondary');
-        recordBtnText.textContent = 'جارٍ الرفع...';
-        recordIcon.style.animationPlayState = 'running';
-
-        const formData = new FormData();
-        formData.append('audio', file);
-
-        try {
-            const res = await fetch('/upload', {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await res.json();
-
-            if (!res.ok || data.status === 'error') {
-                log('خطأ في /upload: ' + (data.error || 'مجهول'), 'error');
-                alert('حدث خطأ أثناء معالجة الصوت: ' + (data.error || 'مجهول'));
-            } else {
-                log('تم رفع الصوت بنجاح. النص: ' + data.text, 'success');
-                userTextBox.textContent = data.text || 'لم يتم استخراج نص.';
-                assistantTextBox.textContent = data.response || 'لا يوجد رد.';
-                btnPlayAudio.disabled = false;
+                recordBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-block';
+                clearBtn.disabled = true;
+                statusText.innerHTML = '🔴 جاري التسجيل... تحدث الآن';
+                statusText.classList.add('recording');
+                statusBox.classList.remove('error', 'success');
+                result.style.display = 'none';
+            } catch (error) {
+                console.error('Error:', error);
+                statusText.innerHTML = '❌ خطأ في الوصول للميكروفون. تأكد من السماح بالوصول.';
+                statusBox.classList.add('error');
             }
-        } catch (err) {
-            log('فشل الاتصال بمسار /upload: ' + err.message, 'error');
-            alert('تعذر الاتصال بالخادم.');
-        } finally {
-            btnTestRecord.disabled = false;
-            btnTestRecord.classList.remove('btn-secondary');
-            recordBtnText.textContent = 'اختبار إرسال ملف صوتي يدويًا';
-            recordIcon.style.animationPlayState = 'paused';
-            audioFileInput.value = '';
-        }
-    });
+        });
 
-    btnClear.addEventListener('click', async () => {
-        try {
-            const res = await fetch('/clear', { method: 'POST' });
-            const data = await res.json();
-            if (data.status === 'cleared') {
-                userTextBox.textContent = 'لم يصل نص بعد.';
-                assistantTextBox.textContent = 'لا يوجد رد بعد.';
-                btnPlayAudio.disabled = true;
-                assistantAudio.src = '';
-                log('تم مسح آخر استجابة.', 'success');
+        stopBtn.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
             }
-        } catch (err) {
-            log('تعذر الاتصال بمسار /clear', 'error');
-        }
-    });
+            stopBtn.style.display = 'none';
+            recordBtn.style.display = 'inline-block';
+            statusText.classList.remove('recording');
+            statusBox.classList.remove('error', 'success');
+            statusText.innerHTML = '<div class="loader"></div>';
+        });
 
-    btnPlayAudio.addEventListener('click', async () => {
-        try {
-            log('جلب الصوت من /get-audio-stream...', '');
-            const res = await fetch('/get-audio-stream');
-            if (!res.ok) {
-                log('لا يوجد صوت متاح حالياً.', 'error');
-                alert('لا يوجد صوت متاح الآن.');
-                return;
+        clearBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                if (response.ok) {
+                    result.style.display = 'none';
+                    statusText.innerHTML = 'تم المسح بنجاح ✅';
+                    statusBox.classList.add('success');
+                    setTimeout(() => {
+                        statusText.innerHTML = 'اضغط على زر التسجيل للبدء';
+                        statusBox.classList.remove('success');
+                    }, 2000);
+                }
+            } catch (error) {
+                console.error('Clear error:', error);
             }
-            const blob = await res.blob();
-            const url = URL.createObjectURL(blob);
-            assistantAudio.src = url;
-            assistantAudio.play().then(() => {
-                log('تم تشغيل الصوت في المتصفح.', 'success');
-            }).catch(err => {
-                log('تعذر تشغيل الصوت في المتصفح: ' + err.message, 'error');
-            });
-        } catch (err) {
-            log('تعذر الاتصال بمسار /get-audio-stream', 'error');
+        });
+
+        async function uploadAudio(audioBlob) {
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'recording.webm');
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    statusText.innerHTML = '✅ تم المعالجة بنجاح!';
+                    statusBox.classList.add('success');
+                    transcriptText.textContent = data.text;
+                    responseText.textContent = data.response;
+                    result.style.display = 'block';
+                    clearBtn.disabled = false;
+                } else {
+                    statusText.innerHTML = '❌ حدث خطأ: ' + (data.error || 'خطأ غير معروف');
+                    statusBox.classList.add('error');
+                    clearBtn.disabled = false;
+                }
+            } catch (error) {
+                console.error('Upload error:', error);
+                statusText.innerHTML = '❌ خطأ في الاتصال بالسيرفر. حاول مرة أخرى.';
+                statusBox.classList.add('error');
+                clearBtn.disabled = false;
+            }
         }
-    });
-</script>
+    </script>
 </body>
 </html>
 """
@@ -459,6 +426,7 @@ HTML_PAGE = """
 @app.route('/')
 def index():
     return render_template_string(HTML_PAGE)
+
 
 @app.route('/upload', methods=['POST'])
 def upload_audio():
@@ -476,7 +444,6 @@ def upload_audio():
 
         audio_file.seek(0)
         audio_bytes = audio_file.read()
-
         transcript = client.audio.transcriptions.create(
             model="whisper-large-v3",
             file=(audio_file.filename, audio_bytes, audio_file.mimetype),
@@ -538,6 +505,7 @@ def upload_audio():
         esp32_data['status'] = 'ready'
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
+
 @app.route('/get-audio-stream', methods=['GET'])
 def get_audio_stream():
     try:
@@ -552,24 +520,24 @@ def get_audio_stream():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/status', methods=['GET'])
 def get_status():
     return jsonify({'server': 'online', 'esp32_status': esp32_data['status']})
+
 
 @app.route('/clear', methods=['POST'])
 def clear_audio():
     esp32_data['audio_data'] = None
     esp32_data['has_audio'] = False
-    esp32_data['text'] = ''
-    esp32_data['response_text'] = ''
-    esp32_data['status'] = 'ready'
     return jsonify({'status': 'cleared'})
+
 
 @app.route('/test-groq')
 def test_groq():
     try:
         if client is None:
-            return "client is None (no API key)", 500
+            return "client is None (no API key configured)", 500
 
         resp = client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -580,6 +548,7 @@ def test_groq():
         return resp.choices[0].message.content
     except Exception as e:
         return f"ERROR: {e}", 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
