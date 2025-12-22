@@ -1,8 +1,10 @@
 flask
 flask-cors
-openai
+groq
+httpx
 gTTS
 python-dotenv
 soundfile
 numpy
+requests
 gunicorn
