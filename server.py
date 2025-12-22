@@ -3,16 +3,16 @@ import io
 import logging
 import soundfile as sf
 import numpy as np
+import httpx
+import requests
 from flask import Flask, request, jsonify, send_file, render_template_string
 from flask_cors import CORS
-from openai import OpenAI
+from groq import Groq
 from gtts import gTTS
 from dotenv import load_dotenv
 
-
 # Load environment variables
 load_dotenv()
-
 
 # Configure logging
 logging.basicConfig(
@@ -21,32 +21,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
-
 # Configure max upload size (10MB)
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
-
-# Initialize Groq client
+# Initialize Groq official client
 try:
-    api_key = os.getenv('GROQ_API_KEY') or os.getenv('OPENAI_API_KEY')
+    api_key = os.getenv('GROQ_API_KEY')
     if not api_key:
-        logger.error("GROQ_API_KEY/OPENAI_API_KEY not found in environment variables")
+        logger.error("GROQ_API_KEY not found in environment variables")
         client = None
     else:
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.groq.com/openai/v1"
-        )
-        logger.info("Groq client initialized successfully")
+        http_client = httpx.Client(timeout=30.0)
+        client = Groq(api_key=api_key, http_client=http_client)
+        logger.info("Groq client (official) initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize Groq client: {str(e)}")
     client = None
-
 
 # Global state for ESP32 communication
 esp32_data = {
@@ -56,7 +50,6 @@ esp32_data = {
     'text': '',
     'response_text': ''
 }
-
 
 # ====================== HTML PAGE ======================
 
@@ -276,7 +269,7 @@ HTML_PAGE = """
 <body>
     <div class="container">
         <h1>🎤 مساعد صوتي ذكي</h1>
-        <p class="subtitle">مدعوم بـ Groq Whisper و Llama 3 (نسخة مجانية)</p>
+        <p class="subtitle">مدعوم بـ Groq Whisper و Llama 3</p>
 
         <div class="controls">
             <button id="recordBtn">🎙️ ابدأ التسجيل</button>
@@ -427,7 +420,6 @@ HTML_PAGE = """
 def index():
     return render_template_string(HTML_PAGE)
 
-
 @app.route('/upload', methods=['POST'])
 def upload_audio():
     try:
@@ -444,9 +436,10 @@ def upload_audio():
 
         audio_file.seek(0)
         audio_bytes = audio_file.read()
+
         transcript = client.audio.transcriptions.create(
             model="whisper-large-v3",
-            file=(audio_file.filename, audio_bytes, audio_file.mimetype),
+            file=("audio.webm", audio_bytes, audio_file.mimetype),
             language="ar"
         )
         user_text = transcript.text
@@ -505,7 +498,6 @@ def upload_audio():
         esp32_data['status'] = 'ready'
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
-
 @app.route('/get-audio-stream', methods=['GET'])
 def get_audio_stream():
     try:
@@ -520,19 +512,29 @@ def get_audio_stream():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/status', methods=['GET'])
 def get_status():
     return jsonify({'server': 'online', 'esp32_status': esp32_data['status']})
-
 
 @app.route('/clear', methods=['POST'])
 def clear_audio():
     esp32_data['audio_data'] = None
     esp32_data['has_audio'] = False
+    esp32_data['text'] = ''
+    esp32_data['response_text'] = ''
+    esp32_data['status'] = 'ready'
     return jsonify({'status': 'cleared'})
 
+# اختبار شبكة عامة
+@app.route('/test-net')
+def test_net():
+    try:
+        r = requests.get("https://api.groq.com/openai/v1/models", timeout=10)
+        return f"status={r.status_code}"
+    except Exception as e:
+        return f"NET ERROR: {e}", 500
 
+# اختبار Groq مباشرة
 @app.route('/test-groq')
 def test_groq():
     try:
@@ -548,7 +550,6 @@ def test_groq():
         return resp.choices[0].message.content
     except Exception as e:
         return f"ERROR: {e}", 500
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
