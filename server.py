@@ -525,7 +525,8 @@ def clear_audio():
     esp32_data['status'] = 'ready'
     return jsonify({'status': 'cleared'})
 
-# اختبار شبكة عامة
+# ===== مسارات التشخيص =====
+
 @app.route('/test-net')
 def test_net():
     try:
@@ -534,7 +535,6 @@ def test_net():
     except Exception as e:
         return f"NET ERROR: {e}", 500
 
-# اختبار Groq مباشرة
 @app.route('/test-groq')
 def test_groq():
     try:
