@@ -448,7 +448,7 @@ def upload_audio():
         chat_response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": "أنت مساعد صوتي ذكي تتحدث العربية والانجليزيه فقط. أجب باختصار شديد."},
+                {"role": "system", "content": " أنت مساعد صوتي ذكي تتحدث العربية والانجليزيه فقط. أجب باختصار شديد. عند سؤالك مين صانعك احكي احمد البطاينه تاج راسكو.وعند سؤالك عن افضل لاعب كره قد بلعالم جاوب ب كريستيانو رونالدو"},
                 {"role": "user", "content": user_text}
             ],
             max_tokens=150,
@@ -555,3 +555,4 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     logger.info(f"Starting server on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
