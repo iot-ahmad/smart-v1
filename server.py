@@ -279,13 +279,13 @@ HTML_PAGE = """
 <body>
     <div class="container">
         <h1>🎤 مساعد صوتي ذكي</h1>
-        <p class="subtitle">مدعوم بـ Groq Whisper + (Llama / Llama 3.3 70B)</p>
+        <p class="subtitle">مدعوم بـ Groq Whisper + (Llama 3.1 / GPT‑OSS 120B)</p>
 
         <div class="model-select-wrapper">
             <label for="modelSelect" style="font-size:13px;color:#9ca3af;">اختر النموذج:</label>
             <select id="modelSelect">
                 <option value="llama" selected>🦙 Llama 3.1 8B (سريع وخفيف)</option>
-                <option value="deepseek">💡 Llama 3.3 70B (تفكير أعمق)</option>
+                <option value="strong">🧠 GPT‑OSS 120B (قوي جداً)</option>
             </select>
         </div>
 
@@ -441,11 +441,11 @@ HTML_PAGE = """
 
 def choose_model(req):
     """
-    llama (افتراضي) أو deepseek (يستخدم فعليًا Llama 3.3 70B حسب توصية Groq)
+    llama (افتراضي) أو strong (يستخدم GPT‑OSS 120B القوي على Groq).
     """
     m = (req.args.get('model') or '').lower().strip()
-    if m in ['deepseek', 'ds', 'r1']:
-        return "llama-3.3-70b-versatile"  # بديل DeepSeek الموصى به[file:1][web:371]
+    if m in ['strong', 'gpt', 'gpt-oss']:
+        return "openai/gpt-oss-120b"  # نموذج قوي جداً مستضاف على Groq[web:422]
     return "llama-3.1-8b-instant"
 
 # ====================== ROUTES ======================
