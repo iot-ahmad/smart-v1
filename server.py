@@ -14,21 +14,17 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
-
-# Configure max upload size (10MB)
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
-# Initialize Groq official client
+# Initialize Groq client
 try:
     api_key = os.getenv('GROQ_API_KEY')
     if not api_key:
@@ -42,7 +38,6 @@ except Exception as e:
     logger.error(f"Failed to initialize Groq client: {str(e)}")
     client = None
 
-# Global state for ESP32 communication
 esp32_data = {
     'status': 'ready',
     'audio_data': None,
@@ -101,14 +96,14 @@ HTML_PAGE = """
         .subtitle {
             text-align: center;
             color: #a3a3a3;
-            margin-bottom: 26px;
+            margin-bottom: 18px;
             font-size: 13px;
         }
 
         .controls {
             display: flex;
             gap: 12px;
-            margin-bottom: 22px;
+            margin-bottom: 10px;
             justify-content: center;
             flex-wrap: wrap;
         }
@@ -156,6 +151,21 @@ HTML_PAGE = """
             cursor: not-allowed;
             box-shadow: none;
             transform: none;
+        }
+
+        .model-select-wrapper {
+            margin-bottom: 18px;
+            text-align: center;
+        }
+
+        select {
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid #4b5563;
+            background: #020617;
+            color: #e5e7eb;
+            font-size: 13px;
+            outline: none;
         }
 
         .status {
@@ -269,7 +279,15 @@ HTML_PAGE = """
 <body>
     <div class="container">
         <h1>🎤 مساعد صوتي ذكي</h1>
-        <p class="subtitle">مدعوم بـ Groq Whisper و Llama 3</p>
+        <p class="subtitle">مدعوم بـ Groq Whisper + (Llama / DeepSeek)</p>
+
+        <div class="model-select-wrapper">
+            <label for="modelSelect" style="font-size:13px;color:#9ca3af;">اختر النموذج:</label>
+            <select id="modelSelect">
+                <option value="llama" selected>🦙 Llama 3.1 (سريع وخفيف)</option>
+                <option value="deepseek">🧠 DeepSeek R1 Distill (تفكير أعمق)</option>
+            </select>
+        </div>
 
         <div class="controls">
             <button id="recordBtn">🎙️ ابدأ التسجيل</button>
@@ -301,6 +319,7 @@ HTML_PAGE = """
         const result = document.getElementById('result');
         const transcriptText = document.getElementById('transcriptText');
         const responseText = document.getElementById('responseText');
+        const modelSelect = document.getElementById('modelSelect');
 
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             statusText.innerHTML = '❌ المتصفح لا يدعم تسجيل الصوت';
@@ -384,14 +403,18 @@ HTML_PAGE = """
         async function uploadAudio(audioBlob) {
             const formData = new FormData();
             formData.append('audio', audioBlob, 'recording.webm');
+
+            const selectedModel = modelSelect.value || 'llama';
+            const url = '/upload?model=' + encodeURIComponent(selectedModel);
+
             try {
-                const response = await fetch('/upload', {
+                const response = await fetch(url, {
                     method: 'POST',
                     body: formData
                 });
                 const data = await response.json();
                 if (data.status === 'ok') {
-                    statusText.innerHTML = '✅ تم المعالجة بنجاح!';
+                    statusText.innerHTML = '✅ تم المعالجة بنجاح! (النموذج: ' + (data.model || selectedModel) + ')';
                     statusBox.classList.add('success');
                     transcriptText.textContent = data.text;
                     responseText.textContent = data.response;
@@ -413,6 +436,18 @@ HTML_PAGE = """
 </body>
 </html>
 """
+
+# ====================== MODEL SELECTION ======================
+
+def choose_model(req):
+    """
+    يختار موديل Groq بناء على ?model=
+    llama (افتراضي) أو deepseek
+    """
+    m = (req.args.get('model') or '').lower().strip()
+    if m in ['deepseek', 'ds', 'r1']:
+        return "deepseek-r1-distill-llama-70b"  # مثال موديل DeepSeek على Groq[web:357][web:366]
+    return "llama-3.1-8b-instant"
 
 # ====================== ROUTES ======================
 
@@ -437,6 +472,7 @@ def upload_audio():
         audio_file.seek(0)
         audio_bytes = audio_file.read()
 
+        # Whisper
         transcript = client.audio.transcriptions.create(
             model="whisper-large-v3",
             file=("audio.webm", audio_bytes, audio_file.mimetype),
@@ -445,10 +481,20 @@ def upload_audio():
         user_text = transcript.text
         esp32_data['text'] = user_text
 
+        # اختيار الموديل
+        selected_model = choose_model(request)
+        logger.info(f"Using chat model: {selected_model}")
+
+        system_prompt = (
+            "أنت مساعد صوتي ذكي تتحدث العربية والانجليزية فقط. "
+            "أجب باختصار شديد. عند سؤالك مين صانعك قل: احمد البطاينة تاج راسكو. "
+            "وعند سؤالك عن افضل لاعب كرة قدم بالعالم جاوب: كريستيانو رونالدو."
+        )
+
         chat_response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=selected_model,
             messages=[
-                {"role": "system", "content": " أنت مساعد صوتي ذكي تتحدث العربية والانجليزيه فقط. أجب باختصار شديد. عند سؤالك مين صانعك احكي احمد البطاينه تاج راسكو.وعند سؤالك عن افضل لاعب كره قد بلعالم جاوب ب كريستيانو رونالدو"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text}
             ],
             max_tokens=150,
@@ -457,6 +503,7 @@ def upload_audio():
         response_text = chat_response.choices[0].message.content
         esp32_data['response_text'] = response_text
 
+        # TTS + Resample 16kHz
         logger.info("Converting to speech (gTTS) & Resampling to 16kHz...")
 
         tts = gTTS(text=response_text, lang='ar')
@@ -490,6 +537,7 @@ def upload_audio():
             'status': 'ok',
             'text': user_text,
             'response': response_text,
+            'model': selected_model,
             'audio_url': '/get-audio-stream'
         })
 
@@ -525,8 +573,6 @@ def clear_audio():
     esp32_data['status'] = 'ready'
     return jsonify({'status': 'cleared'})
 
-# ===== مسارات التشخيص =====
-
 @app.route('/test-net')
 def test_net():
     try:
@@ -555,4 +601,3 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     logger.info(f"Starting server on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
-
