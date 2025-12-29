@@ -3,9 +3,11 @@ import io
 import logging
 import soundfile as sf
 import numpy as np
+import httpx
+import requests
 from flask import Flask, request, jsonify, send_file, render_template_string
 from flask_cors import CORS
-from openai import OpenAI
+from groq import Groq
 from gtts import gTTS
 from dotenv import load_dotenv
 
@@ -19,25 +21,22 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
-
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
+# Groq client
 try:
-    api_key = os.getenv('GROQ_API_KEY') or os.getenv('OPENAI_API_KEY')
+    api_key = os.getenv('GROQ_API_KEY')
     if not api_key:
-        logger.error("GROQ_API_KEY/OPENAI_API_KEY not found in environment variables")
+        logger.error("GROQ_API_KEY not found in environment variables")
         client = None
     else:
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.groq.com/openai/v1"
-        )
-        logger.info("Groq client initialized successfully")
+        http_client = httpx.Client(timeout=30.0)
+        client = Groq(api_key=api_key, http_client=http_client)
+        logger.info("Groq client (official) initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize Groq client: {str(e)}")
     client = None
 
-# Global state for ESP32 communication
 esp32_data = {
     'status': 'ready',
     'audio_data': None,
@@ -46,7 +45,7 @@ esp32_data = {
     'response_text': ''
 }
 
-#HTML PAGE
+#HTML PAGE 
 
 HTML_PAGE = """
 <!DOCTYPE html>
@@ -59,7 +58,7 @@ HTML_PAGE = """
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif';
             background: radial-gradient(at 0% 0%, #3b3b3b 0%, #050505 60%);
             min-height: 100vh;
             display: flex;
@@ -96,14 +95,14 @@ HTML_PAGE = """
         .subtitle {
             text-align: center;
             color: #a3a3a3;
-            margin-bottom: 26px;
+            margin-bottom: 18px;
             font-size: 13px;
         }
 
         .controls {
             display: flex;
             gap: 12px;
-            margin-bottom: 22px;
+            margin-bottom: 10px;
             justify-content: center;
             flex-wrap: wrap;
         }
@@ -263,13 +262,13 @@ HTML_PAGE = """
 </head>
 <body>
     <div class="container">
-        <h1> مساعد صوتي ذكي</h1>
-        <p class="subtitle">مدعوم بـ Groq Whisper و Llama 3 (نسخة مجانية)</p>
+        <h1>مساعد صوتي ذكي</h1>
+        <p class="subtitle">مدعوم بـ Groq Whisper و Llama 3.1 8B</p>
 
         <div class="controls">
-            <button id="recordBtn">🎙️ ابدأ التسجيل</button>
-            <button id="stopBtn"> إيقاف التسجيل</button>
-            <button id="clearBtn"> مسح</button>
+            <button id="recordBtn">ابدأ التسجيل</button>
+            <button id="stopBtn">إيقاف التسجيل</button>
+            <button id="clearBtn">مسح</button>
         </div>
 
         <div class="status" id="statusBox">
@@ -277,12 +276,12 @@ HTML_PAGE = """
         </div>
 
         <div class="result" id="result">
-            <h3> النص المحول:</h3><p id="transcriptText"></p>
-            <h3 style="margin-top: 10px;"> رد المساعد:</h3><p id="responseText"></p>
+            <h3>النص المحول:</h3><p id="transcriptText"></p>
+            <h3 style="margin-top: 10px;">رد المساعد:</h3><p id="responseText"></p>
         </div>
 
         <div class="footer">
-            <p>Powered by Groq &amp; Google TTS</p>
+            <p>Powered by Groq & Google TTS</p>
         </div>
     </div>
 
@@ -298,7 +297,7 @@ HTML_PAGE = """
         const responseText = document.getElementById('responseText');
 
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            statusText.innerHTML = ' المتصفح لا يدعم تسجيل الصوت';
+            statusText.innerHTML = 'المتصفح لا يدعم تسجيل الصوت';
             statusBox.classList.add('error');
             recordBtn.disabled = true;
         }
@@ -333,13 +332,13 @@ HTML_PAGE = """
                 recordBtn.style.display = 'none';
                 stopBtn.style.display = 'inline-block';
                 clearBtn.disabled = true;
-                statusText.innerHTML = ' جاري التسجيل... تحدث الآن';
+                statusText.innerHTML = 'جاري التسجيل... تحدث الآن';
                 statusText.classList.add('recording');
                 statusBox.classList.remove('error', 'success');
                 result.style.display = 'none';
             } catch (error) {
                 console.error('Error:', error);
-                statusText.innerHTML = ' خطأ في الوصول للميكروفون. تأكد من السماح بالوصول.';
+                statusText.innerHTML = 'خطأ في الوصول للميكروفون. تأكد من السماح بالوصول.';
                 statusBox.classList.add('error');
             }
         });
@@ -364,7 +363,7 @@ HTML_PAGE = """
                 });
                 if (response.ok) {
                     result.style.display = 'none';
-                    statusText.innerHTML = 'تم المسح بنجاح ';
+                    statusText.innerHTML = 'تم المسح بنجاح';
                     statusBox.classList.add('success');
                     setTimeout(() => {
                         statusText.innerHTML = 'اضغط على زر التسجيل للبدء';
@@ -379,27 +378,30 @@ HTML_PAGE = """
         async function uploadAudio(audioBlob) {
             const formData = new FormData();
             formData.append('audio', audioBlob, 'recording.webm');
+
+            const url = '/upload?model=llama';
+
             try {
-                const response = await fetch('/upload', {
+                const response = await fetch(url, {
                     method: 'POST',
                     body: formData
                 });
                 const data = await response.json();
                 if (data.status === 'ok') {
-                    statusText.innerHTML = ' تم المعالجة بنجاح!';
+                    statusText.innerHTML = 'تمت المعالجة بنجاح';
                     statusBox.classList.add('success');
                     transcriptText.textContent = data.text;
                     responseText.textContent = data.response;
                     result.style.display = 'block';
                     clearBtn.disabled = false;
                 } else {
-                    statusText.innerHTML = ' حدث خطأ: ' + (data.error || 'خطأ غير معروف');
+                    statusText.innerHTML = 'حدث خطأ: ' + (data.error || 'خطأ غير معروف');
                     statusBox.classList.add('error');
                     clearBtn.disabled = false;
                 }
             } catch (error) {
                 console.error('Upload error:', error);
-                statusText.innerHTML = ' خطأ في الاتصال بالسيرفر. حاول مرة أخرى.';
+                statusText.innerHTML = 'خطأ في الاتصال بالسيرفر. حاول مرة أخرى.';
                 statusBox.classList.add('error');
                 clearBtn.disabled = false;
             }
@@ -408,6 +410,10 @@ HTML_PAGE = """
 </body>
 </html>
 """
+
+
+def choose_model(req):
+    return "llama-3.1-8b-instant"  
 
 
 @app.route('/')
@@ -428,22 +434,30 @@ def upload_audio():
 
         esp32_data['status'] = 'processing'
 
-        #  (Whisper)
         audio_file.seek(0)
         audio_bytes = audio_file.read()
+
+        # Whisper
         transcript = client.audio.transcriptions.create(
             model="whisper-large-v3",
-            file=(audio_file.filename, audio_bytes, audio_file.mimetype),
+            file=("audio.webm", audio_bytes, audio_file.mimetype),
             language="ar"
         )
         user_text = transcript.text
         esp32_data['text'] = user_text
 
-        # AI Response (Llama) 
+        selected_model = choose_model(request)
+        logger.info(f"Using chat model: {selected_model}")
+
+        system_prompt = (
+            "أنت مساعد صوتي ذكي تتحدث العربية والانجليزية فقط. "
+        
+        )
+
         chat_response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=selected_model,
             messages=[
-                {"role": "system", "content": "أنت مساعد صوتي ذكي تتحدث العربية والانجليزيه فقط. أجب باختصار شديد."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text}
             ],
             max_tokens=150,
@@ -452,8 +466,7 @@ def upload_audio():
         response_text = chat_response.choices[0].message.content
         esp32_data['response_text'] = response_text
 
-        # 3. TTS & Resampling
-        logger.info("Converting to speech (gTTS) & Resampling to 11kHz...")
+        logger.info("Converting to speech (gTTS) & Resampling to 16kHz...")
 
         tts = gTTS(text=response_text, lang='ar')
         mp3_fp = io.BytesIO()
@@ -486,6 +499,7 @@ def upload_audio():
             'status': 'ok',
             'text': user_text,
             'response': response_text,
+            'model': selected_model,
             'audio_url': '/get-audio-stream'
         })
 
@@ -516,7 +530,34 @@ def get_status():
 def clear_audio():
     esp32_data['audio_data'] = None
     esp32_data['has_audio'] = False
+    esp32_data['text'] = ''
+    esp32_data['response_text'] = ''
+    esp32_data['status'] = 'ready'
     return jsonify({'status': 'cleared'})
+
+@app.route('/test-net')
+def test_net():
+    try:
+        r = requests.get("https://api.groq.com/openai/v1/models", timeout=10)
+        return f"status={r.status_code}"
+    except Exception as e:
+        return f"NET ERROR: {e}", 500
+
+@app.route('/test-groq')
+def test_groq():
+    try:
+        if client is None:
+            return "client is None (no API key configured)", 500
+
+        resp = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=5,
+            temperature=0.0,
+        )
+        return resp.choices[0].message.content
+    except Exception as e:
+        return f"ERROR: {e}", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
